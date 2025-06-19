@@ -26,6 +26,12 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage> {
   bool _isPhoneValid = false;
   bool _isLoading = false;
   String? _verificationPhoneNumber;
+  
+  // Country code related state
+  final _countryCodeController = TextEditingController(text: '+91');
+  
+  // Get the full phone number with country code
+  String get _fullPhoneNumber => '${_countryCodeController.text.trim()}${_phoneController.text.trim()}';
 
   // Handle OTP input changes
   void _onOtpChanged(String value, int index) {
@@ -57,9 +63,9 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage> {
       });
       
       print('[DEBUG] Verifying OTP: $otp for phone: $_verificationPhoneNumber');
-      
+    
       final response = await http.post(
-        Uri.parse(ApiConfig.verifyOtpEndpoint),
+        Uri.parse('${ApiConfig.baseUrl}/api/verify-otp'),
         headers: {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
@@ -117,6 +123,102 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage> {
     }
   }
   
+  // Build country code input field
+  Widget _buildCountryCodeInput() {
+    return SizedBox(
+      width: 100,
+      child: TextField(
+        controller: _countryCodeController,
+        keyboardType: TextInputType.phone,
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+        decoration: InputDecoration(
+          hintText: '+91',
+          hintStyle: TextStyle(color: Colors.grey[500]),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey.shade400),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide(color: Colors.grey.shade400),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: const BorderSide(color: Colors.blue, width: 1.5),
+          ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+          isDense: true,
+        ),
+        onChanged: (value) {
+          final newValue = value.replaceAll(RegExp(r'[^0-9+]'), '');
+          if (newValue != value) {
+            _countryCodeController.value = TextEditingValue(
+              text: newValue,
+              selection: TextSelection.collapsed(offset: newValue.length),
+            );
+          }
+          // Re-validate phone number when country code changes
+          _validatePhone(_phoneController.text);
+        },
+      ),
+    );
+  }
+
+  // Build phone input field with country code
+  Widget _buildPhoneInput() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Enter your phone number',
+          style: TextStyle(
+            fontSize: 15,
+            color: Colors.black,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            // Country code input
+            _buildCountryCodeInput(),
+            const SizedBox(width: 10),
+            // Phone number input
+            Expanded(
+              child: TextField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  hintText: 'Phone number',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.grey.shade400),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: Colors.grey.shade400),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(color: Colors.blue, width: 2),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  isDense: true,
+                ),
+                onChanged: _validatePhone,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(15), // Reasonable max length for phone numbers
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   Widget _buildOtpInput() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -164,6 +266,7 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage> {
   @override
   void dispose() {
     _phoneController.dispose();
+    _countryCodeController.dispose();
     for (var controller in _otpControllers) {
       controller.dispose();
     }
@@ -177,8 +280,10 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage> {
     setState(() {
       // Remove all non-digit characters and check length
       final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
-      _isPhoneValid = digits.length == 10;
-      print('Phone validation: $digits (${digits.length} digits) - Valid: $_isPhoneValid');
+      _verificationPhoneNumber = '${_countryCodeController.text}$digits';
+      // More flexible validation - at least 7 digits, max 15
+      _isPhoneValid = digits.length >= 7 && digits.length <= 15;
+      print('Phone validation: ${_countryCodeController.text}$digits (${digits.length} digits) - Valid: $_isPhoneValid');
     });
   }
 
@@ -195,7 +300,7 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage> {
     if (!mounted) return;
     setState(() {
       _isLoading = true;
-      _verificationPhoneNumber = '+91$phoneNumber';
+      _verificationPhoneNumber = _fullPhoneNumber;
       // Clear previous OTP fields
       for (var controller in _otpControllers) {
         controller.clear();
@@ -212,8 +317,8 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage> {
       debugPrint('✓ Network connectivity OK');
 
       // 2. Prepare request
-      final url = Uri.parse(ApiConfig.otpEndpoint);
-      final requestBody = {'phone': '+91$phoneNumber'};
+      final url = Uri.parse('${ApiConfig.baseUrl}/api/otp');
+      final requestBody = {'phone': _verificationPhoneNumber};
       final requestBodyJson = jsonEncode(requestBody);
       
       debugPrint('\n[2/4] Request details:');
@@ -370,62 +475,8 @@ class _PhoneVerificationPageState extends State<PhoneVerificationPage> {
                   ),
                 ),
                 const SizedBox(height: 28),
-                // Enter phone label
-                const Text(
-                  'Enter your phone number',
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: Colors.black,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                // Phone input
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade300),
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.grey.shade100,
-                      ),
-                      child: const Text(
-                        '+91',
-                        style: TextStyle(fontSize: 16, color: Colors.black),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: _phoneController,
-                        keyboardType: TextInputType.phone,
-                        onChanged: _validatePhone,
-                        maxLength: 15, // Allow for formatting
-                        decoration: InputDecoration(
-                          hintText: '123-456-7890',
-                          hintStyle: TextStyle(color: Colors.grey.shade400),
-                          filled: true,
-                          fillColor: Colors.grey.shade100,
-                          contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey.shade300),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.grey.shade300),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            borderSide: BorderSide(color: Colors.blue.shade200),
-                          ),
-                          counterText: '', // Hide character counter
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                // Phone input with country code selector
+                _buildPhoneInput(),
                 const SizedBox(height: 18),
                 // Send code button (disabled style)
                 SizedBox(
